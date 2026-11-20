@@ -47,35 +47,38 @@ jobs:
     runs-on: windows-latest
     strategy:
       matrix:
-        bits: [64]
+        arch: [x86, x64]
     permissions:
-      id-token: write
-      attestations: write
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: GuillaumeFalourd/setup-windows10-sdk-action@v2
         with:
           sdk-version: 26100
-      - run: python src/scripts/build_lunahook.py build x64 0 win7
+      # core=1: the standalone LunaHost GUI (BUILD_GUI) no longer builds upstream, so only hook/host DLLs are built.
+      - run: python src/scripts/build_lunahook.py build ${{ matrix.arch }} 1 win7
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{matrix.bits}}
-          path: src/cpp/LunaHook/builds
-  
+          name: ${{ matrix.arch }}
+          path: src/NativeImpl/LunaHook/builds
+          if-no-files-found: error
+
   build:
     runs-on: windows-latest
     needs: [build_x]
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-            path: src/cpp/LunaHook/build
+            path: src/NativeImpl/LunaHook/build
       - run: python src/scripts/build_lunahook.py merge
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: LunaHook
-          files: src/cpp/LunaHook/builds/*
+          files: src/NativeImpl/LunaHook/builds/*
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
