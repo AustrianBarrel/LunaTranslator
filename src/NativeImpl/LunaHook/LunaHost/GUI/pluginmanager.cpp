@@ -440,18 +440,29 @@ addpluginresult Pluginmanager::addplugin(const std::wstring &p)
     return ret;
 }
 
+// TextThread no longer accepts already-decoded text, so text added by plugins is
+// sent straight to the output callback. A separate thread is used because plugins
+// may call this from inside the output callback, which holds the host's output lock.
+static void DispatchPluginText(int64_t number, const wchar_t *text)
+{
+    if (!text)
+        return;
+    std::thread([number, sentence = std::wstring(text)]() mutable
+                {
+        if (TextThread *thread = Host::GetThread(number))
+            TextThread::Output(*thread, sentence); })
+        .detach();
+}
+
 std::array<InfoForExtension, 20> Pluginmanager::GetSentenceInfo(TextThread &thread)
 {
     void (*AddText)(int64_t, const wchar_t *) = [](int64_t number, const wchar_t *text)
     {
-        if (TextThread *thread = Host::GetThread(number))
-            thread->Push(text);
+        DispatchPluginText(number, text);
     };
     void (*AddSentence)(int64_t, const wchar_t *) = [](int64_t number, const wchar_t *sentence)
     {
-        if (TextThread *thread = Host::GetThread(number))
-            thread->AddSentence(sentence);
-        ;
+        DispatchPluginText(number, sentence);
     };
     static DWORD SelectedProcessId;
     auto currthread = (TextThread *)host->currentselect;

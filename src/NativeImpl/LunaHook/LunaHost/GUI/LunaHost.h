@@ -16,7 +16,6 @@ public:
 };
 class Settingwindow : public mainwindow
 {
-    checkbox *ckbfilterrepeat;
     spinbox *g_timeout;
     spinbox *g_codepage;
     checkbox *g_check_clipboard;

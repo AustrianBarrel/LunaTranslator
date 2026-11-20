@@ -8,7 +8,7 @@
 #include "textthread.h"
 #include "LunaHost.h"
 #include "http.hpp"
-extern std::vector<std::tuple<SUPPORT_LANG, std::wstring, std::vector<std::string>>> lang_map;
+#include "uilang.h"
 bool sendclipboarddata_i(const std::wstring &text, HWND hwnd)
 {
     if (!OpenClipboard((HWND)hwnd))
@@ -52,7 +52,6 @@ void LunaHost::savesettings()
     configs->set("AutoAttach", autoattach);
     configs->set("AutoAttach_SavedOnly", autoattach_savedonly);
     configs->set("flushDelay", TextThread::flushDelay);
-    configs->set("filterRepetition", TextThread::filterRepetition);
     configs->set("maxBufferSize", TextThread::maxBufferSize);
     configs->set("maxHistorySize", TextThread::maxHistorySize);
     configs->set("defaultCodepage", Host::defaultCodepage);
@@ -88,7 +87,6 @@ void LunaHost::loadsettings()
     autoattach = configs->get("AutoAttach", false);
     autoattach_savedonly = configs->get("AutoAttach_SavedOnly", true);
     TextThread::flushDelay = configs->get("flushDelay", TextThread::flushDelay);
-    TextThread::filterRepetition = configs->get("filterRepetition", TextThread::filterRepetition);
     TextThread::maxBufferSize = configs->get("maxBufferSize", TextThread::maxBufferSize);
     TextThread::maxHistorySize = configs->get("maxHistorySize", TextThread::maxHistorySize);
     Host::defaultCodepage = configs->get("defaultCodepage", Host::defaultCodepage);
@@ -144,8 +142,9 @@ void LunaHost::on_proc_connect(DWORD pid)
             std::string name = safequeryjson(savedhookcontext[u8procname], "name", std::string());
             if (startWith(name, "UserHook"))
             {
-                if (auto hp = HookCode::Parse(StringToWideString(std::string_view(savedhookcontext[u8procname]["hookcode"]))))
-                    Host::InsertHook(pid, hp.value());
+                auto hookcode = safequeryjson(savedhookcontext[u8procname], "hookcode", std::string());
+                if (!hookcode.empty())
+                    Host::InsertHook(pid, StringToWideString(hookcode));
             }
         }
     }
@@ -198,17 +197,16 @@ LunaHost::LunaHost()
     };
     g_hButton_insert->onclick = [&]()
     {
-        auto hp = HookCode::Parse(std::move(g_hEdit_userhook->text()));
-        if (hp)
-        {
-            for (auto _ : attachedprocess)
-            {
-                Host::InsertHook(_, hp.value());
-            }
-        }
-        else
+        // Hook codes are parsed inside the hook dll now; it reports invalid codes itself.
+        std::wstring hookcode = g_hEdit_userhook->text();
+        if (hookcode.empty())
         {
             showtext(TR[NotifyInvalidHookCode], false);
+            return;
+        }
+        for (auto _ : attachedprocess)
+        {
+            Host::InsertHook(_, hookcode);
         }
     };
 
@@ -219,9 +217,8 @@ LunaHost::LunaHost()
         auto thread_p = g_hListBox_listtext->getdata(idx);
         std::wstring get;
         currentselect = thread_p;
-        std::wstring copy = ((TextThread *)thread_p)->storage->c_str();
-        strReplace(copy, L"\n", L"\r\n");
-        showtext(copy, true);
+        // showtext() converts \n to \r\n itself.
+        showtext(((TextThread *)thread_p)->GetHistoryText(), true);
     };
     g_hListBox_listtext->on_menu = [&]() -> maybehavemenu
     {
@@ -267,7 +264,11 @@ LunaHost::LunaHost()
         [=](HOSTINFO type, const std::wstring &output)
         { on_info(type, output); },
         {},
+        {},
+        ui_i18n_query,
         {});
+    // Apply the selected language to the (Chinese) built-in host strings.
+    Host::ResetLanguage();
 
     mainlayout = new gridlayout();
     mainlayout->addcontrol(g_selectprocessbutton, 0, 0);
@@ -466,13 +467,6 @@ Settingwindow::Settingwindow(LunaHost *host) : mainwindow(host)
         TextThread::maxHistorySize = v;
     };
 
-    ckbfilterrepeat = new checkbox(this, TR[LblFilterRepeat]);
-    ckbfilterrepeat->onclick = [=]()
-    {
-        TextThread::filterRepetition = ckbfilterrepeat->ischecked();
-    };
-    ckbfilterrepeat->setcheck(TextThread::filterRepetition);
-
     g_check_clipboard = new checkbox(this, TR[BtnToClipboard]);
     g_check_clipboard->onclick = [=]()
     {
@@ -508,9 +502,11 @@ Settingwindow::Settingwindow(LunaHost *host) : mainwindow(host)
 
     g_codepage->onvaluechange = [=](int v)
     {
-        if (IsValidCodePage(v))
+        // 0 = auto detect (host default)
+        if (v == 0 || IsValidCodePage(v))
         {
             Host::defaultCodepage = v;
+            Host::BroadCastCodePage();
         }
     };
     g_codepage->setminmax(0, CP_UTF8);
@@ -536,6 +532,7 @@ Settingwindow::Settingwindow(LunaHost *host) : mainwindow(host)
     language->oncurrentchange = [](int idx)
     {
         curr_lang = (decltype(curr_lang))idx;
+        Host::ResetLanguage();
     };
     mainlayout = new gridlayout();
     mainlayout->addcontrol(new label(this, TR[LblLanguage]), 0, 0);
@@ -552,13 +549,12 @@ Settingwindow::Settingwindow(LunaHost *host) : mainwindow(host)
     mainlayout->addcontrol(new label(this, TR[LblMaxHist]), 4, 0);
     mainlayout->addcontrol(spinmaxhistsize, 4, 1);
 
-    mainlayout->addcontrol(ckbfilterrepeat, 5, 0, 1, 2);
-    mainlayout->addcontrol(g_check_clipboard, 6, 0, 1, 2);
-    mainlayout->addcontrol(autoattach, 7, 0, 1, 2);
-    mainlayout->addcontrol(autoattach_so, 8, 0, 1, 2);
-    mainlayout->addcontrol(readonlycheck, 9, 0, 1, 2);
-    mainlayout->addcontrol(showfont, 10, 1);
-    mainlayout->addcontrol(selectfont, 10, 0);
+    mainlayout->addcontrol(g_check_clipboard, 5, 0, 1, 2);
+    mainlayout->addcontrol(autoattach, 6, 0, 1, 2);
+    mainlayout->addcontrol(autoattach_so, 7, 0, 1, 2);
+    mainlayout->addcontrol(readonlycheck, 8, 0, 1, 2);
+    mainlayout->addcontrol(showfont, 9, 1);
+    mainlayout->addcontrol(selectfont, 9, 0);
 
     setlayout(mainlayout);
     setcentral(600, 500);

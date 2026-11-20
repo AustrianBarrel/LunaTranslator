@@ -55,8 +55,8 @@ jobs:
       - uses: GuillaumeFalourd/setup-windows10-sdk-action@v2
         with:
           sdk-version: 26100
-      # core=1: the standalone LunaHost GUI (BUILD_GUI) no longer builds upstream, so only hook/host DLLs are built.
-      - run: python src/scripts/build_lunahook.py build ${{ matrix.arch }} 1 win7
+      # core=0: also build the standalone LunaHost GUI (LunaHost32/64.exe)
+      - run: python src/scripts/build_lunahook.py build ${{ matrix.arch }} 0 win7
 
       - uses: actions/upload-artifact@v4
         with:
@@ -75,7 +75,13 @@ jobs:
         with:
             path: src/NativeImpl/LunaHook/build
       - run: python src/scripts/build_lunahook.py merge
-      - uses: softprops/action-gh-release@v2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Release
+          path: src/NativeImpl/LunaHook/builds/Release.zip
+      # Only runs from main publish the LunaHook release; other branches just keep the artifact.
+      - if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: LunaHook
           files: src/NativeImpl/LunaHook/builds/*
