@@ -23,7 +23,9 @@ foreach(_lang EN CHT RU)
 endforeach()
 file(WRITE ${LUNAHOST_RC} "${LUNAHOST_RC_CONTENT}")
 
-add_executable(LunaHost WIN32 confighelper.cpp controls.cpp main.cpp processlistwindow.cpp  LunaHost.cpp window.cpp uilang.cpp ${LUNAHOST_RC} pluginmanager.cpp Plugin/extensionimpl.cpp Plugin/copyclipboard.cpp QtLoader_inline.cpp app.manifest ${versioninfo})
+# injector.cpp (Host::ConnectAndInjectProcess) is no longer part of the host library, which
+# LunaTranslator uses without it, but the GUI still injects LunaHook itself.
+add_executable(LunaHost WIN32 confighelper.cpp controls.cpp main.cpp processlistwindow.cpp  LunaHost.cpp window.cpp uilang.cpp ../injector.cpp ${LUNAHOST_RC} pluginmanager.cpp Plugin/extensionimpl.cpp Plugin/copyclipboard.cpp QtLoader_inline.cpp app.manifest ${versioninfo})
 target_precompile_headers(LunaHost REUSE_FROM pch)
 set_target_properties(LunaHost PROPERTIES OUTPUT_NAME "LunaHost${bitappendix}")
 
